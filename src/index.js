@@ -315,6 +315,22 @@ async function eloRival(url) {
   return buildRivalSummary(baseProfile, opponentProfile, rivalRow, filteredRecent);
 }
 
+async function recentMatchesForDashboard(playerId, fromDate) {
+  const matches = [];
+  for (let page = 0; page < 10; page += 1) {
+    const rows = await requestEloJson("/api/matches", {
+      player_id: playerId,
+      date_from: fromDate,
+      limit: 200,
+      offset: page * 200,
+    });
+    const pageRows = Array.isArray(rows) ? rows : [];
+    matches.push(...pageRows);
+    if (pageRows.length < 200) return matches;
+  }
+  throw new ResponseError(422, "최근 기간의 전적 수가 너무 많아 대시보드 통계를 계산하지 못했어.");
+}
+
 async function eloDashboard(url) {
   const player = validatePlayerName(url.searchParams.get("player"), "기준 선수");
   const today = String(url.searchParams.get("today") || "").trim();
@@ -323,25 +339,14 @@ async function eloDashboard(url) {
   }
 
   const profile = await resolveProfile(player);
-  const total = Number(profile.games || 0);
-  const pageCount = Math.max(1, Math.ceil(total / 200));
-  if (pageCount > 50) {
-    throw new ResponseError(422, "전적 수가 너무 많아 대시보드 통계를 한 번에 계산하지 못했어.");
-  }
-  const [raceRows, pages] = await Promise.all([
+  const dateKey = today || new Date().toISOString().slice(0, 10);
+  const monthStart = `${dateKey.slice(0, 7)}-01`;
+  const periodStart = [monthStart, mondayOf(dateKey)].sort()[0];
+  const [raceRows, matches] = await Promise.all([
     requestEloJson(`/api/players/${profile.id}/stats/races`),
-    Promise.all(
-      Array.from({ length: pageCount }, (_, index) =>
-        requestEloJson("/api/matches", {
-          player_id: profile.id,
-          limit: 200,
-          offset: index * 200,
-        }),
-      ),
-    ),
+    recentMatchesForDashboard(profile.id, periodStart),
   ]);
-  const matches = pages.flatMap((page) => (Array.isArray(page) ? page : []));
-  return buildDashboardSummary(profile, raceRows, matches, today);
+  return buildDashboardSummary(profile, raceRows, matches, dateKey);
 }
 
 class ResponseError extends Error {
