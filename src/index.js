@@ -297,10 +297,10 @@ async function eloPreview(url) {
 }
 
 async function eloRival(url) {
-  const player = validatePlayerName(url.searchParams.get("player"), "기준 선수");
+  const player = validatePlayerName(url.searchParams.get("player"), "스폰 작성자");
   const opponent = validatePlayerName(url.searchParams.get("opponent"), "상대 선수");
   if (normalizeName(player) === normalizeName(opponent)) {
-    throw new ResponseError(400, "기준 선수와 상대 선수는 다르게 입력해줘.");
+    throw new ResponseError(400, "스폰 작성자와 상대 선수는 다르게 입력해줘.");
   }
 
   const [baseProfile, opponentProfile] = await Promise.all([
@@ -348,7 +348,7 @@ async function allMatchesForDashboard(playerId) {
 }
 
 async function eloDashboard(url) {
-  const player = validatePlayerName(url.searchParams.get("player"), "기준 선수");
+  const player = validatePlayerName(url.searchParams.get("player"), "스폰 작성자");
   const today = String(url.searchParams.get("today") || "").trim();
   if (today && !/^\d{4}-\d{2}-\d{2}$/.test(today)) {
     throw new ResponseError(400, "기준 날짜가 올바르지 않아.");
@@ -416,7 +416,7 @@ export default {
     const origin = env.ALLOWED_ORIGIN || "*";
     if (request.method === "OPTIONS") return json({ ok: true }, 200, origin);
     if (request.method !== "GET") return json({ error: "method not allowed" }, 405, origin);
-    if (url.pathname === "/health") return json({ ok: true, version: "1.5.0" }, 200, origin);
+    if (url.pathname === "/health") return json({ ok: true, version: "1.5.1" }, 200, origin);
     try {
       if (url.pathname === "/api/elo/preview") return json(await eloPreview(url), 200, origin);
       if (url.pathname === "/api/elo/rival") return json(await eloRival(url), 200, origin);
