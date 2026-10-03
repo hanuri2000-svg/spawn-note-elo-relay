@@ -84,6 +84,7 @@ function matchToRecord(match, playerId) {
     eloMatchType: [CATEGORY_LABELS[match.category] || "", match.format_raw || ""]
       .filter(Boolean)
       .join(" · "),
+    eloCategory: CATEGORY_LABELS[match.category] || String(match.category || "기타"),
     eloMemo: String(match.memo || ""),
     eloInputter: String(match.created_by_nickname || ""),
   };
@@ -111,6 +112,18 @@ function recordStats(records = []) {
     games,
     winRate: games ? Math.round((wins / games) * 1000) / 10 : 0,
   };
+}
+
+function groupedRecordStats(records = [], key, emptyLabel) {
+  const groups = new Map();
+  records.forEach((record) => {
+    const label = String(record[key] || "").trim() || emptyLabel;
+    if (!groups.has(label)) groups.set(label, []);
+    groups.get(label).push(record);
+  });
+  return [...groups.entries()]
+    .map(([label, rows]) => ({ label, ...recordStats(rows) }))
+    .sort((a, b) => b.games - a.games || b.winRate - a.winRate || a.label.localeCompare(b.label, "ko"));
 }
 
 function mondayOf(dateKey) {
@@ -154,6 +167,10 @@ function buildDashboardSummary(profile, raceRows = [], matches = [], today) {
         : recordStats(records.filter((record) => record.race === RACE_LABELS[race]));
       return { race, raceLabel: RACE_LABELS[race], ...stats };
     }),
+    maps: groupedRecordStats(records, "map", "맵 미상"),
+    matchTypes: groupedRecordStats(records, "eloCategory", "경기유형 미상"),
+    opponents: groupedRecordStats(records, "opponent", "상대 미상"),
+    detailGames: records.length,
     latestMatchDate: String(player.lastPlayedOn || records[0]?.date || ""),
     asOf: dateKey,
   };
@@ -315,12 +332,11 @@ async function eloRival(url) {
   return buildRivalSummary(baseProfile, opponentProfile, rivalRow, filteredRecent);
 }
 
-async function recentMatchesForDashboard(playerId, fromDate) {
+async function allMatchesForDashboard(playerId) {
   const matches = [];
-  for (let page = 0; page < 10; page += 1) {
+  for (let page = 0; page < 25; page += 1) {
     const rows = await requestEloJson("/api/matches", {
       player_id: playerId,
-      date_from: fromDate,
       limit: 200,
       offset: page * 200,
     });
@@ -328,7 +344,7 @@ async function recentMatchesForDashboard(playerId, fromDate) {
     matches.push(...pageRows);
     if (pageRows.length < 200) return matches;
   }
-  throw new ResponseError(422, "최근 기간의 전적 수가 너무 많아 대시보드 통계를 계산하지 못했어.");
+  throw new ResponseError(422, "전체 공식전이 5,000경기를 넘어 상세 통계를 계산하지 못했어.");
 }
 
 async function eloDashboard(url) {
@@ -340,11 +356,9 @@ async function eloDashboard(url) {
 
   const profile = await resolveProfile(player);
   const dateKey = today || new Date().toISOString().slice(0, 10);
-  const monthStart = `${dateKey.slice(0, 7)}-01`;
-  const periodStart = [monthStart, mondayOf(dateKey)].sort()[0];
   const [raceRows, matches] = await Promise.all([
     requestEloJson(`/api/players/${profile.id}/stats/races`),
-    recentMatchesForDashboard(profile.id, periodStart),
+    allMatchesForDashboard(profile.id),
   ]);
   return buildDashboardSummary(profile, raceRows, matches, dateKey);
 }
@@ -402,7 +416,7 @@ export default {
     const origin = env.ALLOWED_ORIGIN || "*";
     if (request.method === "OPTIONS") return json({ ok: true }, 200, origin);
     if (request.method !== "GET") return json({ error: "method not allowed" }, 405, origin);
-    if (url.pathname === "/health") return json({ ok: true, version: "1.4.0" }, 200, origin);
+    if (url.pathname === "/health") return json({ ok: true, version: "1.5.0" }, 200, origin);
     try {
       if (url.pathname === "/api/elo/preview") return json(await eloPreview(url), 200, origin);
       if (url.pathname === "/api/elo/rival") return json(await eloRival(url), 200, origin);
