@@ -126,6 +126,31 @@ function groupedRecordStats(records = [], key, emptyLabel) {
     .sort((a, b) => b.games - a.games || b.winRate - a.winRate || a.label.localeCompare(b.label, "ko"));
 }
 
+function groupedOpponentStats(records = []) {
+  const groups = new Map();
+  records.forEach((record) => {
+    const label = String(record.opponent || "").trim() || "상대 미상";
+    if (!groups.has(label)) groups.set(label, []);
+    groups.get(label).push(record);
+  });
+  return [...groups.entries()]
+    .map(([label, rows]) => ({
+      label,
+      ...recordStats(rows),
+      lastPlayedOn: rows.reduce(
+        (latest, record) => (String(record.date || "") > latest ? String(record.date || "") : latest),
+        "",
+      ),
+    }))
+    .sort(
+      (a, b) =>
+        b.lastPlayedOn.localeCompare(a.lastPlayedOn) ||
+        b.games - a.games ||
+        a.label.localeCompare(b.label, "ko"),
+    )
+    .slice(0, 20);
+}
+
 function mondayOf(dateKey) {
   const date = new Date(`${dateKey}T00:00:00Z`);
   const weekday = date.getUTCDay();
@@ -169,7 +194,7 @@ function buildDashboardSummary(profile, raceRows = [], matches = [], today) {
     }),
     maps: groupedRecordStats(records, "map", "맵 미상"),
     matchTypes: groupedRecordStats(records, "eloCategory", "경기유형 미상"),
-    opponents: groupedRecordStats(records, "opponent", "상대 미상"),
+    opponents: groupedOpponentStats(records),
     detailGames: records.length,
     latestMatchDate: String(player.lastPlayedOn || records[0]?.date || ""),
     asOf: dateKey,
@@ -416,7 +441,7 @@ export default {
     const origin = env.ALLOWED_ORIGIN || "*";
     if (request.method === "OPTIONS") return json({ ok: true }, 200, origin);
     if (request.method !== "GET") return json({ error: "method not allowed" }, 405, origin);
-    if (url.pathname === "/health") return json({ ok: true, version: "1.5.2" }, 200, origin);
+    if (url.pathname === "/health") return json({ ok: true, version: "1.5.3" }, 200, origin);
     try {
       if (url.pathname === "/api/elo/preview") return json(await eloPreview(url), 200, origin);
       if (url.pathname === "/api/elo/rival") return json(await eloRival(url), 200, origin);
