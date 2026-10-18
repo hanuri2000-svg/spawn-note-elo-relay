@@ -163,16 +163,19 @@ function buildDashboardSummary(profile, raceRows = [], matches = [], today) {
   const dateKey = /^\d{4}-\d{2}-\d{2}$/.test(today) ? today : new Date().toISOString().slice(0, 10);
   const monthKey = dateKey.slice(0, 7);
   const weekStart = mondayOf(dateKey);
+  const seenMatchIds = new Set();
   const records = matches
     .map((match) => matchToRecord(match, player.id))
     .filter(Boolean)
+    .filter((record) => {
+      if (seenMatchIds.has(record.sourceId)) return false;
+      seenMatchIds.add(record.sourceId);
+      return true;
+    })
     .sort((a, b) => b.date.localeCompare(a.date) || Number(b.eloRecordId) - Number(a.eloRecordId));
-  const overall = {
-    wins: player.wins,
-    losses: player.losses,
-    games: player.games,
-    winRate: player.winRate,
-  };
+  // Profile totals may use a different category scope. Every dashboard total
+  // must describe the same complete official match set as the detail groups.
+  const overall = recordStats(records);
 
   return {
     player,

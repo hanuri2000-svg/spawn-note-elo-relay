@@ -12,10 +12,11 @@ const rows = [
   game(3, '2026-10-18', 2, 'P', 'win', 'solo_event', ''),
 ];
 
-test('all official categories, maps, race fallback, periods and profile totals remain distinct', () => {
+test('all official categories, maps, race fallback, periods and overall totals share one complete match set', () => {
   const result = __test.buildDashboardSummary(profile, [{ race: 'T', wins: 10, losses: 5, games: 15, win_rate: 66.7 }], rows, '2026-10-18');
-  assert.deepEqual(result.overall, { wins: 15, losses: 8, games: 23, winRate: 65.2 });
-  assert.equal(result.totalGames, 23);
+  assert.deepEqual(result.overall, { wins: 2, losses: 1, games: 3, winRate: 66.7 });
+  assert.equal(result.player.games, 23); // preserve existing profile fields
+  assert.equal(result.totalGames, 3);
   assert.equal(result.detailGames, 3);
   assert.deepEqual(result.month, { wins: 1, losses: 1, games: 2, winRate: 50 });
   assert.deepEqual(result.week, result.month);
@@ -85,4 +86,12 @@ test('exactly 5000 matches succeeds; overflow and malformed upstream fail explic
   assert.equal((await (await run()).json()).detailGames, 5000);
   mode = 'overflow'; assert.equal((await run()).status, 422);
   mode = 'malformed'; assert.equal((await run()).status, 502);
+});
+
+ test('duplicate match IDs cannot inflate overall or grouped statistics', () => {
+  const result = __test.buildDashboardSummary(profile, [], [...rows, rows[0]], '2026-10-18');
+  assert.equal(result.detailGames, 3);
+  assert.equal(result.totalGames, 3);
+  assert.equal(result.maps.reduce((sum, row) => sum + row.games, 0), 3);
+  assert.equal(result.matchTypes.reduce((sum, row) => sum + row.games, 0), 3);
 });
