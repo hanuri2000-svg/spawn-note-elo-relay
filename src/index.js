@@ -359,13 +359,15 @@ async function eloRival(url) {
 
 async function allMatchesForDashboard(playerId) {
   const matches = [];
-  for (let page = 0; page < 25; page += 1) {
+  for (let page = 0; page <= 25; page += 1) {
     const rows = await requestEloJson("/api/matches", {
       player_id: playerId,
       limit: 200,
       offset: page * 200,
     });
     const pageRows = Array.isArray(rows) ? rows : [];
+    if (!Array.isArray(rows)) throw new ResponseError(502, "ELOBOARD 경기 목록 형식을 확인하지 못했어.");
+    if (page === 25 && pageRows.length) break;
     matches.push(...pageRows);
     if (pageRows.length < 200) return matches;
   }
@@ -441,7 +443,7 @@ export default {
     const origin = env.ALLOWED_ORIGIN || "*";
     if (request.method === "OPTIONS") return json({ ok: true }, 200, origin);
     if (request.method !== "GET") return json({ error: "method not allowed" }, 405, origin);
-    if (url.pathname === "/health") return json({ ok: true, version: "1.5.3" }, 200, origin);
+    if (url.pathname === "/health") return json({ ok: true, version: "1.5.4" }, 200, origin);
     try {
       if (url.pathname === "/api/elo/preview") return json(await eloPreview(url), 200, origin);
       if (url.pathname === "/api/elo/rival") return json(await eloRival(url), 200, origin);
