@@ -385,8 +385,14 @@ async function fetchPublicHtml(path, fetchImpl) {
   if (url.origin !== ORIGIN || !/^\/players\/[1-9]\d*$/.test(url.pathname)) invalid();
   const controller = new AbortController(), timer = setTimeout(() => controller.abort(), 12_000);
   try {
-    const response = await fetchImpl(url.href, { signal: controller.signal, redirect: "error",
-      headers: { "User-Agent": "spawn-note-elo-relay/1.6 (public profile statistics)", Accept: "text/html" } });
+    // Workers supports only follow/manual. Refuse redirects explicitly instead
+    // of using redirect:error, which throws before sending a Worker request.
+    const response = await fetchImpl(url.href, { signal: controller.signal, redirect: "manual",
+      headers: { "User-Agent": "spawn-note-elo-relay/1.6.1 (public profile statistics)", Accept: "text/html" } });
+    if (response.status >= 300 && response.status < 400) {
+      await response.body?.cancel();
+      throw new PublicSourceError("ELOBOARD 공개 페이지가 다른 주소로 이동해 지금 확인하지 못했어.", 502, "PUBLIC_SOURCE_REDIRECT");
+    }
     if (!response.ok) throw new PublicSourceError(`ELOBOARD 공개 페이지를 지금 가져오지 못했어. (${response.status})`, response.status === 404 ? 404 : 502);
     if (!/text\/html/i.test(response.headers.get("content-type") || "") || !response.body) invalid();
     const reader = response.body.getReader(), decoder = new TextDecoder();
