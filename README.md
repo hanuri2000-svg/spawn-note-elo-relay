@@ -8,13 +8,13 @@ This repository owns the `spawn-note-elo-relay` Cloudflare Worker source, regres
 2. Run `npm test`, then commit to this repository.
 3. In `spwn-note/worker`, run `npm run sync:upstream`, `npm test`, and commit the mirror and lock together. The sync records the exact canonical commit and file hashes.
 4. Deploy from this repository with `npm install && npm run deploy` using the existing Cloudflare account. Alternatively the mirror's `npm run deploy` checks canonical main over HTTPS and refuses stale/offline/mismatched deployments before testing and invoking Wrangler. Direct `wrangler deploy` bypasses npm guards; do not use it.
-5. Check `/health` (expected `1.6.2`) and the three `/api/elo/public/*` routes below after deployment. The legacy routes remain available but depend on upstream JSON endpoints that have returned HTTP 403. For rollback, restore the previous canonical commit, sync the mirror, test and deploy.
+5. Check `/health` (expected `1.7.0`) and the four `/api/elo/public/*` routes below after deployment. The legacy routes remain available but depend on upstream JSON endpoints that have returned HTTP 403. For rollback, restore the previous canonical commit, sync the mirror, test and deploy.
 
 CI runs regression tests on pushes and pull requests. The mirror also checks for drift daily and on changes. Only this repository should be connected to Cloudflare automatic builds; build command: `npm ci && npm test`, deploy command: `npm run deploy` (use `npm install` until a lockfile is committed).
 
 ## Compatibility and data
 
-### Public HTML statistics (1.6.2)
+### Public HTML statistics (1.7.0)
 
 The new routes read the ordinary `https://eloboard.com/players/ID` pages. They do not call the upstream JSON API, retry rejected requests, execute upstream scripts, or import matches into a user's records. Profile data uses the main race selected by the public profile. Previously saved local records, ladder entries, aliases, notes and account settings are outside this Worker's storage.
 
@@ -22,11 +22,14 @@ Version 1.6.1 uses `redirect: "manual"` and explicitly rejects every HTTP 3xx re
 
 Version 1.6.2 allows up to 30 seconds for each single public HTML request, including its body. This accommodates slower server-rendered source pages without adding retries. Clients should allow at least 100 seconds for summary (three pages), 35 seconds for rival (one page), and 220 seconds for recent (at most seven pages); the three routes remain independent.
 
+Version 1.7.0 adds coverage-aware activity summaries for registered players and refreshes successful public snapshots once per Korean calendar day on demand. Activity and recent share one collection of at most 50 matches per player; activity also needs a client deadline of at least 220 seconds for a cold collection. There is no scheduled task or background polling requirement.
+
 | GET route | Result |
 | --- | --- |
 | `/api/elo/public/summary?playerId=443` | `player`, `overall`, `races`, `types`, `maps`, `opponents` |
 | `/api/elo/public/rival?playerId=443&opponentId=513` | `player`, `opponent`, `headToHead` with `from`/`to`, `maps`, `types` |
 | `/api/elo/public/recent?playerId=443&limit=50` | `playerId`, `requested`, `complete`, `warning`, `matches` |
+| `/api/elo/public/activity?playerId=443` | `playerId`, `asOfDate`, `coverage`, `today`, `currentMonth`, `streak`, `months`; supports any valid positive player ID and never returns a match list |
 
 Every response includes `schemaVersion: 1`, `source: "eloboard"`, `fetchedAt` (ISO UTC), `sourceUrl`, and `stale`. Aggregate rows contain numeric `wins`, `losses`, `games`, `winRate`; race rows add `race`/`label`, type rows add `key`/`label`, map rows add `id`/`label`, and opponent rows add `id`/`name`/`race`. Player ELO is a number or explicitly `null` when the public page marks it unavailable. Unknown races remain empty strings.
 
@@ -34,7 +37,15 @@ Summary reads the profile, maps and rivals pages. It preserves the displayed agg
 
 Recent matches are currently restricted to player 443 and a limit from 1 to 50. Each row contains `id`, `date`, `opponentId`, `opponent`, `race`, `result` (`W`/`L`), `map`, `type`, and signed numeric `eloChange` (or `null`). This list follows the site's own order, including ties within a date. The collector requests at most seven public HTML pages, using the visible inclusive `to` date filter. The whole previous boundary-day suffix must equal the next page's prefix, and repeated match objects must remain unchanged. Duplicate IDs, changed records, ignored filters, invalid dates and inconsistent profile totals fail validation. When the public daily window saturates or the request bound is reached, `complete: false` and a warning describe the partial result. Statistics never use that partial list as lifetime totals.
 
-Successful results are cached for five minutes, both in bounded Worker memory and Cloudflare's Cache API when available. Concurrent identical requests share one source request sequence. A failed refresh can serve a previously validated result no older than 24 hours, with `stale: true`, the original `fetchedAt`, and a warning; the HTTP response is `no-store`. Failed refreshes have a 30-second backoff and never become zero-filled successful responses. A prior complete recent result is retained rather than replaced by an incomplete refresh. Every source fetch has a 30-second deadline, a 5 MB body bound and no retries. Refresh is request-driven; the Worker does not introduce scheduled collection.
+Activity reports `coverage: {from, to, complete, allMatches}`. `from`/`to` are the oldest/newest included match dates, or `null` for a verified empty history. `complete` means the latest 50 matches (or all available history) were collected; it does not mean every calendar period is covered. `allMatches` is true only when the complete collected list equals the profile's full match count. Pre-1.7 cached snapshots without that field are treated as `allMatches: false`.
+
+`today` has `date`, `currentMonth` and each `months` entry have `month`; each contains `complete`, `wins`, `losses`, `games`, `winRate`. A period is complete only when a complete latest-match collection extends strictly before its start date, or the whole source history is known. All four numbers are `null` for incomplete periods. `months` includes the snapshot month plus months represented in the collected matches, and does not claim to list the player's full historical months. `streak: {result, count, complete}` uses `W`/`L` (or `null` for no matches); a uniform truncated prefix has `complete: false`, so its count is a lower bound. Dates are based on the actual snapshot `fetchedAt` in UTC+09:00. Future-dated match rows fail validation. A stale snapshot keeps its original `asOfDate` and `today.date`; clients must not present yesterday's values as today's totals.
+
+For example, the verified 443 fixture contains 50 records from 2026-09-28 through 2026-11-14. At its 2026-11-16 snapshot, November is complete at 32 games (10 wins, 22 losses, 31.3%) and October is complete at 13 games (7 wins, 6 losses, 53.8%). September is incomplete and its activity totals are `null`. The newest `WWWL` sequence proves a complete current streak of three wins.
+
+Successful results use bounded Worker memory and Cloudflare's Cache API when available. A snapshot whose `fetchedAt` is on the current Korean calendar day is reused; the first request on a new day refreshes it. Concurrent identical requests share one source sequence, and activity/recent use the same `recent/PLAYER/50` key. The existing v1 successful cache keys are preserved so a same-day 1.6 snapshot survives the upgrade without an unnecessary source fetch. Failed attempts are remembered in bounded memory and the Cache API for that Korean day; subsequent requests return the prior validated snapshot or the saved error until the next day. This is cache-based refresh control, not a global lock across unavailable or independent caches.
+
+A failed refresh can serve a previously validated result no older than 24 hours, with `stale: true`, its original `fetchedAt`, and a warning; the HTTP response is `no-store`. The age bound is checked again after a slow failed refresh. Failures never become zero-filled successful responses, and a prior complete collection is retained instead of an incomplete refresh. Every source fetch has a 30-second deadline, a 5 MB body bound and no retries. No user journals, aliases, ladder records, settings or source data are written by these routes.
 
 CORS preserves `ALLOWED_ORIGIN`, accepts additional comma/space-separated `ALLOWED_ORIGINS`, and permits `https://hanuri2000-svg.github.io` and `https://my-starlog.pages.dev`. An unknown origin is not reflected when an origin allowlist is configured. The existing wildcard behavior remains when `ALLOWED_ORIGIN` is unset or `*`.
 
