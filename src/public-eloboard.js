@@ -383,12 +383,12 @@ export async function collectPublicRecent(fetchPage, playerId, limit = 50) {
 async function fetchPublicHtml(path, fetchImpl) {
   const url = new URL(path, ORIGIN);
   if (url.origin !== ORIGIN || !/^\/players\/[1-9]\d*$/.test(url.pathname)) invalid();
-  const controller = new AbortController(), timer = setTimeout(() => controller.abort(), 12_000);
+  const controller = new AbortController(), timer = setTimeout(() => controller.abort(), 30_000);
   try {
     // Workers supports only follow/manual. Refuse redirects explicitly instead
     // of using redirect:error, which throws before sending a Worker request.
     const response = await fetchImpl(url.href, { signal: controller.signal, redirect: "manual",
-      headers: { "User-Agent": "spawn-note-elo-relay/1.6.1 (public profile statistics)", Accept: "text/html" } });
+      headers: { "User-Agent": "spawn-note-elo-relay/1.6.2 (public profile statistics)", Accept: "text/html" } });
     if (response.status >= 300 && response.status < 400) {
       await response.body?.cancel();
       throw new PublicSourceError("ELOBOARD 공개 페이지가 다른 주소로 이동해 지금 확인하지 못했어.", 502, "PUBLIC_SOURCE_REDIRECT");

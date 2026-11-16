@@ -8,17 +8,19 @@ This repository owns the `spawn-note-elo-relay` Cloudflare Worker source, regres
 2. Run `npm test`, then commit to this repository.
 3. In `spwn-note/worker`, run `npm run sync:upstream`, `npm test`, and commit the mirror and lock together. The sync records the exact canonical commit and file hashes.
 4. Deploy from this repository with `npm install && npm run deploy` using the existing Cloudflare account. Alternatively the mirror's `npm run deploy` checks canonical main over HTTPS and refuses stale/offline/mismatched deployments before testing and invoking Wrangler. Direct `wrangler deploy` bypasses npm guards; do not use it.
-5. Check `/health` (expected `1.6.1`) and the three `/api/elo/public/*` routes below after deployment. The legacy routes remain available but depend on upstream JSON endpoints that have returned HTTP 403. For rollback, restore the previous canonical commit, sync the mirror, test and deploy.
+5. Check `/health` (expected `1.6.2`) and the three `/api/elo/public/*` routes below after deployment. The legacy routes remain available but depend on upstream JSON endpoints that have returned HTTP 403. For rollback, restore the previous canonical commit, sync the mirror, test and deploy.
 
 CI runs regression tests on pushes and pull requests. The mirror also checks for drift daily and on changes. Only this repository should be connected to Cloudflare automatic builds; build command: `npm ci && npm test`, deploy command: `npm run deploy` (use `npm install` until a lockfile is committed).
 
 ## Compatibility and data
 
-### Public HTML statistics (1.6.1)
+### Public HTML statistics (1.6.2)
 
 The new routes read the ordinary `https://eloboard.com/players/ID` pages. They do not call the upstream JSON API, retry rejected requests, execute upstream scripts, or import matches into a user's records. Profile data uses the main race selected by the public profile. Previously saved local records, ladder entries, aliases, notes and account settings are outside this Worker's storage.
 
 Version 1.6.1 uses `redirect: "manual"` and explicitly rejects every HTTP 3xx response without following its `Location`. Cloudflare Workers [does not implement the Fetch standard's `redirect: "error"` mode](https://developers.cloudflare.com/workers/runtime-apis/request/); that mode threw before sending a source request in 1.6.0. The redirect refusal policy is unchanged, and runtime compatibility plus refusal of redirects are covered by regression tests.
+
+Version 1.6.2 allows up to 30 seconds for each single public HTML request, including its body. This accommodates slower server-rendered source pages without adding retries. Clients should allow at least 100 seconds for summary (three pages), 35 seconds for rival (one page), and 220 seconds for recent (at most seven pages); the three routes remain independent.
 
 | GET route | Result |
 | --- | --- |
@@ -32,7 +34,7 @@ Summary reads the profile, maps and rivals pages. It preserves the displayed agg
 
 Recent matches are currently restricted to player 443 and a limit from 1 to 50. Each row contains `id`, `date`, `opponentId`, `opponent`, `race`, `result` (`W`/`L`), `map`, `type`, and signed numeric `eloChange` (or `null`). This list follows the site's own order, including ties within a date. The collector requests at most seven public HTML pages, using the visible inclusive `to` date filter. The whole previous boundary-day suffix must equal the next page's prefix, and repeated match objects must remain unchanged. Duplicate IDs, changed records, ignored filters, invalid dates and inconsistent profile totals fail validation. When the public daily window saturates or the request bound is reached, `complete: false` and a warning describe the partial result. Statistics never use that partial list as lifetime totals.
 
-Successful results are cached for five minutes, both in bounded Worker memory and Cloudflare's Cache API when available. Concurrent identical requests share one source request sequence. A failed refresh can serve a previously validated result no older than 24 hours, with `stale: true`, the original `fetchedAt`, and a warning; the HTTP response is `no-store`. Failed refreshes have a 30-second backoff and never become zero-filled successful responses. A prior complete recent result is retained rather than replaced by an incomplete refresh. Every source fetch has a 12-second deadline, a 5 MB body bound and no retries. Refresh is request-driven; the Worker does not introduce scheduled collection.
+Successful results are cached for five minutes, both in bounded Worker memory and Cloudflare's Cache API when available. Concurrent identical requests share one source request sequence. A failed refresh can serve a previously validated result no older than 24 hours, with `stale: true`, the original `fetchedAt`, and a warning; the HTTP response is `no-store`. Failed refreshes have a 30-second backoff and never become zero-filled successful responses. A prior complete recent result is retained rather than replaced by an incomplete refresh. Every source fetch has a 30-second deadline, a 5 MB body bound and no retries. Refresh is request-driven; the Worker does not introduce scheduled collection.
 
 CORS preserves `ALLOWED_ORIGIN`, accepts additional comma/space-separated `ALLOWED_ORIGINS`, and permits `https://hanuri2000-svg.github.io` and `https://my-starlog.pages.dev`. An unknown origin is not reflected when an origin allowlist is configured. The existing wildcard behavior remains when `ALLOWED_ORIGIN` is unset or `*`.
 
