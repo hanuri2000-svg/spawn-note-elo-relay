@@ -8,7 +8,7 @@ This repository owns the `spawn-note-elo-relay` Cloudflare Worker source, regres
 2. Run `npm test`, then commit to this repository.
 3. In `spwn-note/worker`, run `npm run sync:upstream`, `npm test`, and commit the mirror and lock together. The sync records the exact canonical commit and file hashes.
 4. Deploy from this repository with `npm install && npm run deploy` using the existing Cloudflare account. Alternatively the mirror's `npm run deploy` checks canonical main over HTTPS and refuses stale/offline/mismatched deployments before testing and invoking Wrangler. Direct `wrangler deploy` bypasses npm guards; do not use it.
-5. Check `/health` (expected `1.7.0`) and the four `/api/elo/public/*` routes below after deployment. The legacy routes remain available but depend on upstream JSON endpoints that have returned HTTP 403. For rollback, restore the previous canonical commit, sync the mirror, test and deploy.
+5. Check `/health` (expected `1.7.1`) and the four `/api/elo/public/*` routes below after deployment. The legacy routes remain available but depend on upstream JSON endpoints that have returned HTTP 403. For rollback, restore the previous canonical commit, sync the mirror, test and deploy.
 
 CI runs regression tests on pushes and pull requests. The mirror also checks for drift daily and on changes. Only this repository should be connected to Cloudflare automatic builds; build command: `npm ci && npm test`, deploy command: `npm run deploy` (use `npm install` until a lockfile is committed).
 
@@ -22,7 +22,7 @@ Version 1.6.1 uses `redirect: "manual"` and explicitly rejects every HTTP 3xx re
 
 Version 1.6.2 allows up to 30 seconds for each single public HTML request, including its body. This accommodates slower server-rendered source pages without adding retries. Clients should allow at least 100 seconds for summary (three pages), 35 seconds for rival (one page), and 220 seconds for recent (at most seven pages); the three routes remain independent.
 
-Version 1.7.0 adds coverage-aware activity summaries for registered players and refreshes successful public snapshots once per Korean calendar day on demand. Activity and recent share one collection of at most 50 matches per player; activity also needs a client deadline of at least 220 seconds for a cold collection. There is no scheduled task or background polling requirement.
+Version 1.7.0 adds coverage-aware activity summaries for registered players and refreshes successful public snapshots at most once per 12 elapsed hours on demand. Activity and recent share one collection of at most 50 matches per player; activity also needs a client deadline of at least 220 seconds for a cold collection. There is no scheduled task or background polling requirement.
 
 | GET route | Result |
 | --- | --- |
@@ -43,7 +43,9 @@ Activity reports `coverage: {from, to, complete, allMatches}`. `from`/`to` are t
 
 For example, the verified 443 fixture contains 50 records from 2026-09-28 through 2026-11-14. At its 2026-11-16 snapshot, November is complete at 32 games (10 wins, 22 losses, 31.3%) and October is complete at 13 games (7 wins, 6 losses, 53.8%). September is incomplete and its activity totals are `null`. The newest `WWWL` sequence proves a complete current streak of three wins.
 
-Successful results use bounded Worker memory and Cloudflare's Cache API when available. A snapshot whose `fetchedAt` is on the current Korean calendar day is reused; the first request on a new day refreshes it. Concurrent identical requests share one source sequence, and activity/recent use the same `recent/PLAYER/50` key. The existing v1 successful cache keys are preserved so a same-day 1.6 snapshot survives the upgrade without an unnecessary source fetch. Failed attempts are remembered in bounded memory and the Cache API for that Korean day; subsequent requests return the prior validated snapshot or the saved error until the next day. This is cache-based refresh control, not a global lock across unavailable or independent caches.
+Successful results use bounded Worker memory and Cloudflare's Cache API when available. A snapshot is reused for 12 elapsed hours from its actual `fetchedAt`, irrespective of Korean midnight. The first request after expiry refreshes it. Concurrent identical requests share one source sequence, and activity/recent use the same `recent/PLAYER/50` key. The existing v1 cache keys are preserved. Failed attempts are retained for 12 hours; failed refreshes serve a validated snapshot within the existing 24-hour stale limit rather than fabricated zeros. Cache availability and independent edge locations mean this is not a global cross-region lock. No schedule runs when there are no requests.
+
+Version 1.7.1 additionally returns optional `recentResults: [{id,date,result}]` in activity responses, at most 50, so clients can combine manually recorded ladder outcomes without downloading or exposing a full match list. Dates and winners do not establish an exact interleaving of manual and official games on the same day; clients must preserve that uncertainty. Private ladder records and annotations never reach this service.
 
 A failed refresh can serve a previously validated result no older than 24 hours, with `stale: true`, its original `fetchedAt`, and a warning; the HTTP response is `no-store`. The age bound is checked again after a slow failed refresh. Failures never become zero-filled successful responses, and a prior complete collection is retained instead of an incomplete refresh. Every source fetch has a 30-second deadline, a 5 MB body bound and no retries. No user journals, aliases, ladder records, settings or source data are written by these routes.
 
