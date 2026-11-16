@@ -8,15 +8,17 @@ This repository owns the `spawn-note-elo-relay` Cloudflare Worker source, regres
 2. Run `npm test`, then commit to this repository.
 3. In `spwn-note/worker`, run `npm run sync:upstream`, `npm test`, and commit the mirror and lock together. The sync records the exact canonical commit and file hashes.
 4. Deploy from this repository with `npm install && npm run deploy` using the existing Cloudflare account. Alternatively the mirror's `npm run deploy` checks canonical main over HTTPS and refuses stale/offline/mismatched deployments before testing and invoking Wrangler. Direct `wrangler deploy` bypasses npm guards; do not use it.
-5. Check `/health` (expected `1.6.0`) and the three `/api/elo/public/*` routes below after deployment. The legacy routes remain available but depend on upstream JSON endpoints that have returned HTTP 403. For rollback, restore the previous canonical commit, sync the mirror, test and deploy.
+5. Check `/health` (expected `1.6.1`) and the three `/api/elo/public/*` routes below after deployment. The legacy routes remain available but depend on upstream JSON endpoints that have returned HTTP 403. For rollback, restore the previous canonical commit, sync the mirror, test and deploy.
 
 CI runs regression tests on pushes and pull requests. The mirror also checks for drift daily and on changes. Only this repository should be connected to Cloudflare automatic builds; build command: `npm ci && npm test`, deploy command: `npm run deploy` (use `npm install` until a lockfile is committed).
 
 ## Compatibility and data
 
-### Public HTML statistics (1.6.0)
+### Public HTML statistics (1.6.1)
 
 The new routes read the ordinary `https://eloboard.com/players/ID` pages. They do not call the upstream JSON API, retry rejected requests, execute upstream scripts, or import matches into a user's records. Profile data uses the main race selected by the public profile. Previously saved local records, ladder entries, aliases, notes and account settings are outside this Worker's storage.
+
+Version 1.6.1 uses `redirect: "manual"` and explicitly rejects every HTTP 3xx response without following its `Location`. Cloudflare Workers [does not implement the Fetch standard's `redirect: "error"` mode](https://developers.cloudflare.com/workers/runtime-apis/request/); that mode threw before sending a source request in 1.6.0. The redirect refusal policy is unchanged, and runtime compatibility plus refusal of redirects are covered by regression tests.
 
 | GET route | Result |
 | --- | --- |

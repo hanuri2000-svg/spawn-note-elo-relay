@@ -25,7 +25,7 @@ function sourceFetch(calls, { fail = () => false } = {}) {
     calls.push(url);
     assert.equal(url.origin, 'https://eloboard.com');
     assert.equal(url.pathname, '/players/443');
-    assert.equal(init.redirect, 'error');
+    assert.equal(init.redirect, 'manual');
     if (fail()) return new Response('Forbidden', { status: 403 });
     const tab = url.searchParams.get('tab');
     if (!tab) return response(fixtures.summary);
@@ -252,6 +252,34 @@ test('public upstream timeout has one bounded attempt', async t => {
   await assert.rejects(pending, error => error.status === 504);
   assert.equal(signals.length, 1);
   assert.equal(signals[0].aborted, true);
+});
+
+test('public fetch works in the Workers runtime that rejects redirect:error before network access', async () => {
+  let requests = 0;
+  const adapter = createPublicAdapter({ edgeCache: () => undefined, fetchImpl: async (_url, init) => {
+    if (init.redirect === 'error') throw new TypeError('Invalid redirect mode: error');
+    assert.equal(init.redirect, 'manual');
+    assert.match(init.headers['User-Agent'], /1\.6\.1/);
+    requests++;
+    return response(fixtures['rival-513']);
+  } });
+  const result = await adapter.handle(route('rival?playerId=443&opponentId=513'));
+  assert.equal(result.headToHead.games, 38);
+  assert.equal(requests, 1);
+});
+
+test('public redirects are refused without following Location or retrying', async () => {
+  for (const status of [300, 301, 302, 303, 304, 307, 308]) {
+    const requested = [];
+    const adapter = createPublicAdapter({ edgeCache: () => undefined, fetchImpl: async (url, init) => {
+      requested.push(url);
+      assert.equal(init.redirect, 'manual');
+      return new Response(null, { status, headers: { Location: 'https://unrelated.invalid/player-data' } });
+    } });
+    await assert.rejects(adapter.handle(route('rival?playerId=443&opponentId=513')),
+      error => error.status === 502 && error.code === 'PUBLIC_SOURCE_REDIRECT');
+    assert.deepEqual(requested, ['https://eloboard.com/players/443?tab=rivals&vs=513']);
+  }
 });
 
 test('Worker exposes the additive contracts and allows both existing sites and My Starlog without reflecting unknown origins', async t => {
