@@ -1,0 +1,65 @@
+name: Apply verified 12-hour statistics update
+on:
+  push:
+    branches: ['feat/12h-ladder-notes-20261116']
+    paths: ['.github/workflows/apply-statistics-update.yml']
+permissions:
+  contents: write
+jobs:
+  apply:
+    if: github.ref == 'refs/heads/feat/12h-ladder-notes-20261116'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Apply reviewed source and regression updates
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          root=Path('.')
+          p=root/'src/public-eloboard.js';s=p.read_text()
+          s=s.replace('const STALE_TTL =', 'const REFRESH_INTERVAL = 12 * 60 * 60_000;\nconst STALE_TTL =',1)
+          s=s.replace('    playerId: snapshot.playerId, asOfDate,','    playerId: snapshot.playerId, asOfDate,\n    recentResults: rows.map(row => ({ id: row.id, date: row.date, result: row.result })),',1)
+          s=s.replace('    const day = koreanDate(now());\n','')
+          s=s.replace('if (stored && koreanDate(stored.fetchedAt) === day) return stored;', 'if (stored && now() - Date.parse(stored.fetchedAt) < REFRESH_INTERVAL) return stored;')
+          s=s.replace('if (failed && failed.at <= now() && koreanDate(failed.at) === day)', 'if (failed && failed.at <= now() && now() - failed.at < REFRESH_INTERVAL)')
+          s=s.replace('1.7.0','1.7.1')
+          assert '=== day' not in s
+          p.write_text(s)
+          p=root/'src/index.js';p.write_text(p.read_text().replace('1.7.0','1.7.1'))
+          p=root/'package.json';p.write_text(p.read_text().replace('1.7.0','1.7.1'))
+          p=root/'tests/public-eloboard.test.mjs';s=p.read_text().replace('1\\.7\\.0','1\\.7\\.1')
+          s=s.replace('one KST day','12 elapsed hours').replace('the next day','the next 12-hour window')
+          s=s.replace('KST calendar-day server cache coalesces requests and refreshes on the next 12-hour window', '12-hour server cache coalesces requests and refreshes at expiry')
+          s=s.replace('2026-11-16T14:59:59.999Z','2026-11-16T21:59:59.999Z')
+          s=s.replace("time = Date.parse('2026-11-16T15:00:00Z')", "time = Date.parse('2026-11-16T22:00:00Z')")
+          s=s.replace("time = Date.parse('2026-11-16T15:00:00.000Z')", "time = Date.parse('2026-11-16T22:00:00.000Z')")
+          a=s.index("test('activity dates follow the KST snapshot date")
+          b=s.index('\ntest(',a+1)
+          s=s[:a]+s[a:b].replace('2026-11-16T21:59:59.999Z','2026-11-16T14:59:59.999Z')+s[b:]
+          s=s.replace('until the next KST day','until the next 12-hour window').replace('until the next day','until the next 12-hour window')
+          p.write_text(s)
+          p=root/'tests/dashboard.test.mjs';p.write_text(p.read_text().replace("health.version,'1.7.0'", "health.version,'1.7.1'"))
+          p=root/'README.md';s=p.read_text();s=s.replace('expected `1.7.0`','expected `1.7.1`')
+          s=s.replace('once per Korean calendar day on demand','at most once per 12 elapsed hours on demand')
+          a=s.index('A snapshot whose `fetchedAt`');b=s.index('\n\nA failed refresh',a)
+          s=s[:a]+'''A snapshot is reused for 12 elapsed hours from its actual `fetchedAt`, irrespective of Korean midnight. The first request after expiry refreshes it. Concurrent identical requests share one source sequence, and activity/recent use the same `recent/PLAYER/50` key. The existing v1 cache keys are preserved. Failed attempts are retained for 12 hours; failed refreshes serve a validated snapshot within the existing 24-hour stale limit rather than fabricated zeros. Cache availability and independent edge locations mean this is not a global cross-region lock. No schedule runs when there are no requests.\n\nVersion 1.7.1 additionally returns optional `recentResults: [{id,date,result}]` in activity responses, at most 50, so clients can combine manually recorded ladder outcomes without downloading or exposing a full match list. Dates and winners do not establish an exact interleaving of manual and official games on the same day; clients must preserve that uncertainty. Private ladder records and annotations never reach this service.''' + s[b:]
+          p.write_text(s)
+          PY
+          echo 'e2b9c3526154c1bb55ece337ae64a0d00e3b590c79fadf0a21471b7b2268fc69  src/public-eloboard.js' | sha256sum -c
+          echo 'a83e4be86536fcc436bfefee78c5e19493ebe9508b49820bde0a503ed6fad44c  src/index.js' | sha256sum -c
+          echo '991b709a53cbcc20d2232eb53dbcb259f756c0d032a3e25e1b12d543be8fbefb  tests/public-eloboard.test.mjs' | sha256sum -c
+      - name: Test and commit only the feature branch
+        run: |
+          npm test
+          git add README.md package.json src/index.js src/public-eloboard.js tests/dashboard.test.mjs tests/public-eloboard.test.mjs
+          git diff --cached --check
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'Refresh public statistics after 12 hours and expose verified outcome sequence'
+          git push origin HEAD:refs/heads/feat/12h-ladder-notes-20261116
