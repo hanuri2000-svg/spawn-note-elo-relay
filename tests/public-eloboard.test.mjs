@@ -248,7 +248,9 @@ test('public upstream timeout has one bounded attempt', async t => {
     return new Promise((_resolve, reject) => signal.addEventListener('abort', () => reject(new Error('aborted'))));
   } });
   const pending = adapter.handle(route('rival?playerId=443&opponentId=513'));
-  t.mock.timers.tick(12_000);
+  t.mock.timers.tick(29_999);
+  assert.equal(signals[0].aborted, false);
+  t.mock.timers.tick(1);
   await assert.rejects(pending, error => error.status === 504);
   assert.equal(signals.length, 1);
   assert.equal(signals[0].aborted, true);
@@ -259,7 +261,7 @@ test('public fetch works in the Workers runtime that rejects redirect:error befo
   const adapter = createPublicAdapter({ edgeCache: () => undefined, fetchImpl: async (_url, init) => {
     if (init.redirect === 'error') throw new TypeError('Invalid redirect mode: error');
     assert.equal(init.redirect, 'manual');
-    assert.match(init.headers['User-Agent'], /1\.6\.1/);
+    assert.match(init.headers['User-Agent'], /1\.6\.2/);
     requests++;
     return response(fixtures['rival-513']);
   } });
