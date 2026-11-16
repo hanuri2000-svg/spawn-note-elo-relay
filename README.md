@@ -1,3 +1,7 @@
+## Six-hour and manual refresh (1.7.2)
+
+Automatic public snapshots refresh on demand after six elapsed hours. Each of the four `/api/elo/public/*` routes accepts `refresh=1` for an explicit new source lookup before that interval. It bypasses successful and failed six-hour caches, shares concurrent work, and uses a 15-second per-resource cooldown for repeated manual actions. Recent and activity still share a single collection. Manual responses use `Cache-Control: no-store`. Failed manual requests keep the original validated data and timestamp, marked stale; a recovered success clears old failure markers. No access-control bypass, retries of rejected source requests, private-record uploads, or changes to pagination are introduced.
+
 # ELOBOARD relay — canonical source
 
 This repository owns the `spawn-note-elo-relay` Cloudflare Worker source, regression tests and Wrangler configuration. `hanuri2000-svg/spwn-note/worker` is a generated mirror, not a second implementation.
